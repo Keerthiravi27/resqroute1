@@ -1,0 +1,40 @@
+[
+  {
+    "id": "SOS-MVDHXX5N-6C86",
+    "ambulanceNumber": "AMB-DEMO-01",
+    "patientName": "Unknown",
+    "age": null,
+    "emergencyType": "Cardiac / chest pain",
+    "urgency": "Critical",
+    "condition": "பேஷண்டுக்கு ஹார்ட் அட்டாக்",
+    "requiredSpecialist": "Cardiology",
+    "requiredEquipment": [
+      "ECG"
+    ],
+    "requirementsSource": "staff",
+    "latitude": 12.841043,
+    "longitude": 79.6949375,
+    "locationSource": "gps",
+    "language": "ta-IN",
+    "originalTranscript": "பேஷண்டுக்கு ஹார்ட் அட்டாக்",
+    "translatedTranscript": "",
+    "translationTarget": "",
+    "translationStatus": "none",
+    "voiceRecordingUrl": "/uploads/sos-1792308058899-5eb2f515.webm",
+    "status": "ACCEPTED",
+    "createdAt": "2026-10-18T07:20:58.906Z",
+    "updatedAt": "2026-10-18T07:21:40.026Z",
+    "hospitalResponses": [
+      {
+        "hospitalId": "H001",
+        "hospitalName": "Chennai City General Hospital",
+        "decision": "accepted",
+        "message": "availabe",
+        "respondedAt": "2026-10-18T07:21:40.026Z"
+      }
+    ],
+    "acceptedHospitalId": "H001",
+    "acceptedHospitalName": "Chennai City General Hospital",
+    "acceptedAt": "2026-10-18T07:21:40.026Z"
+  }
+]

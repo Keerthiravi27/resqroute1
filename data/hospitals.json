@@ -1,0 +1,76 @@
+[
+  {
+    "id": "H001",
+    "name": "Chennai City General Hospital",
+    "area": "Central Chennai (demo)",
+    "latitude": 13.0827,
+    "longitude": 80.2707,
+    "availableBeds": 12,
+    "icuBeds": 3,
+    "specialists": [
+      "Cardiology",
+      "General Medicine"
+    ],
+    "equipment": [
+      "Ventilator",
+      "ECG"
+    ],
+    "available": true
+  },
+  {
+    "id": "H002",
+    "name": "GreenLife Medical Centre",
+    "area": "Teynampet (demo)",
+    "latitude": 13.0604,
+    "longitude": 80.2496,
+    "availableBeds": 5,
+    "icuBeds": 0,
+    "specialists": [
+      "Orthopedics",
+      "General Medicine"
+    ],
+    "equipment": [
+      "X-Ray",
+      "ECG"
+    ],
+    "available": true
+  },
+  {
+    "id": "H003",
+    "name": "Emergency Care Hospital",
+    "area": "Kilpauk (demo)",
+    "latitude": 13.0475,
+    "longitude": 80.209,
+    "availableBeds": 8,
+    "icuBeds": 2,
+    "specialists": [
+      "Cardiology",
+      "Neurology"
+    ],
+    "equipment": [
+      "Ventilator",
+      "ECG",
+      "CT Scanner"
+    ],
+    "available": true
+  },
+  {
+    "id": "H004",
+    "name": "Lakeside Neuro & Trauma Institute",
+    "area": "Adyar (demo)",
+    "latitude": 13.0012,
+    "longitude": 80.2565,
+    "availableBeds": 4,
+    "icuBeds": 1,
+    "specialists": [
+      "Neurology",
+      "Orthopedics"
+    ],
+    "equipment": [
+      "CT Scanner",
+      "X-Ray",
+      "Ventilator"
+    ],
+    "available": true
+  }
+]

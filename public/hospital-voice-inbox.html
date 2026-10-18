@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ResQRoute | Voice inbox</title>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🎧 ResQRoute<small>Voice SOS inbox</small></div>
+  <nav id="nav" aria-label="Main"></nav>
+</header>
+
+<main class="wrap">
+  <div class="notice">
+    Demo prototype. Recordings and transcripts are stored by your local server. A missing transcript does
+    not mean the audio is missing. Verify patient details independently.
+  </div>
+
+  <section class="card">
+    <div class="row">
+      <div class="grow"><label for="q" style="margin-top:0">Search</label><input id="q" placeholder="ID, ambulance, transcript"></div>
+      <div class="grow"><label for="st" style="margin-top:0">Status</label>
+        <select id="st"><option value="ALL">All statuses</option><option>PENDING</option><option>ACCEPTED</option><option>DECLINED</option><option>CANCELLED</option><option>COMPLETED</option></select></div>
+      <div class="conn off" id="conn" role="status"><i></i><span>Connecting…</span></div>
+    </div>
+  </section>
+
+  <section id="list"><div class="empty">Loading voice requests…</div></section>
+  <p class="muted">Refreshes every 5 seconds. The list is not rebuilt while nothing has changed, so audio keeps playing.</p>
+</main>
+
+<script src="common.js"></script>
+<script>
+renderNav("inbox");
+const $ = (id) => document.getElementById(id);
+let all = [], sig = "";
+
+function setConn(ok) {
+  $("conn").className = "conn " + (ok ? "on" : "off");
+  $("conn").querySelector("span").textContent = ok ? "Connected" : "Server not reachable";
+}
+
+async function load() {
+  try {
+    all = (await api("/requests")).filter((r) => r.voiceRecordingUrl);
+    setConn(true);
+    render();
+  } catch (e) {
+    setConn(false);
+    if (!all.length) $("list").innerHTML = `<div class="notice err">${esc(e.message)}</div>`;
+  }
+}
+
+function render() {
+  const q = $("q").value.toLowerCase().trim(), st = $("st").value;
+  const items = all.filter((r) =>
+    (st === "ALL" || r.status === st) &&
+    (!q || [r.id, r.ambulanceNumber, r.originalTranscript, r.translatedTranscript, r.condition].join(" ").toLowerCase().includes(q)));
+  const nextSig = JSON.stringify(items.map((r) => [r.id, r.status, r.updatedAt, r.originalTranscript, r.translatedTranscript]));
+  if (nextSig === sig) return;
+  sig = nextSig;
+
+  $("list").innerHTML = items.length ? items.map((r) => {
+    const lat = num(r.latitude), lon = num(r.longitude);
+    return `<article class="card">
+      <div class="item-top">
+        <div><h2 style="margin:0">${esc(r.id)}</h2>
+          <div class="muted">Ambulance ${esc(r.ambulanceNumber)} · ${esc(fmtTime(r.createdAt))}</div></div>
+        <div class="row">${r.urgency !== "Normal" ? `<span class="badge ${r.urgency === "Critical" ? "red" : "amber"}">${esc(r.urgency)}</span>` : ""}${badge(r.status)}</div>
+      </div>
+      <p><strong>${esc(r.patientName)}</strong> · ${esc(r.condition)}</p>
+      <audio controls preload="none" src="${esc(r.voiceRecordingUrl)}">Your browser cannot play this audio.</audio>
+      <div class="two" style="margin-top:.6rem">
+        <div class="kv" style="grid-template-columns:1fr"><div><small>Original transcript (${esc(LANG_NAMES[r.language] || r.language || "language not recorded")})</small>
+          ${r.originalTranscript ? esc(r.originalTranscript) : '<span class="muted">No transcript was saved. Listen to the recording.</span>'}</div></div>
+        <div class="kv" style="grid-template-columns:1fr"><div><small>Translated transcript${r.translationTarget ? " (" + esc(LANG_NAMES[r.translationTarget] || r.translationTarget) + ")" : ""}</small>
+          ${r.translatedTranscript ? esc(r.translatedTranscript) : '<span class="muted">No translation.</span>'}</div></div>
+      </div>
+      <div class="row" style="margin-top:.5rem">
+        <a class="btn small" href="index.html?request=${encodeURIComponent(r.id)}">Open in hospital dashboard</a>
+        <a class="btn small" href="hospital-matches.html?request=${encodeURIComponent(r.id)}">Compare hospitals</a>
+        ${coordsOK(lat, lon) ? `<a class="btn small" target="_blank" rel="noopener noreferrer" href="${esc(mapLinkURL(lat, lon))}">Ambulance location (${esc(r.locationSource === "gps" ? "GPS" : "simulated/manual")})</a>` : ""}
+      </div>
+    </article>`;
+  }).join("") : `<div class="empty">${all.length ? "No voice requests match the filters." : "No voice SOS requests yet. Record one from the Ambulance page."}</div>`;
+}
+
+$("q").addEventListener("input", render);
+$("st").addEventListener("input", render);
+every(5000, load);
+</script>
+</body>
+</html>

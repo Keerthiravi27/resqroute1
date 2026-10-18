@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ResQRoute | Hospital dashboard</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🏥 ResQRoute<small>Hospital dashboard</small></div>
+  <nav id="nav" aria-label="Main"></nav>
+</header>
+
+<main class="wrap">
+  <div class="notice">
+    Demo prototype with no real login. Choose which fictional hospital you are acting as.
+    Verify real patient needs and capacity independently; this tool does not contact emergency services.
+  </div>
+
+  <section class="card">
+    <div class="row">
+      <div class="grow">
+        <label for="hospSel" style="margin-top:0">Acting as hospital (demo role selector)</label>
+        <select id="hospSel"></select>
+      </div>
+      <div class="conn off" id="conn" role="status"><i></i><span>Connecting…</span></div>
+    </div>
+    <div id="hospInfo" class="kv"></div>
+    <div class="row">
+      <div><label for="bedsIn">General beds</label><input id="bedsIn" type="number" min="0" max="9999" style="width:100px"></div>
+      <div><label for="icuIn">ICU beds</label><input id="icuIn" type="number" min="0" max="9999" style="width:100px"></div>
+      <div><label for="availIn">Availability</label>
+        <select id="availIn" style="width:190px"><option value="true">Available for emergencies</option><option value="false">Unavailable / diverted</option></select></div>
+      <button class="btn" id="saveCap" type="button" style="align-self:flex-end">Save capacity</button>
+    </div>
+  </section>
+
+  <section class="stats" aria-label="Summary">
+    <div class="stat"><b id="sIncoming">0</b><span>Incoming SOS requests</span></div>
+    <div class="stat"><b id="sPending">0</b><span>Pending (awaiting our response)</span></div>
+    <div class="stat"><b id="sAccepted">0</b><span>Accepted by us</span></div>
+    <div class="stat"><b id="sDeclined">0</b><span>Declined by us</span></div>
+  </section>
+
+  <div class="layout">
+    <section class="card">
+      <h2>Incoming emergency requests</h2>
+      <div class="two">
+        <div><label for="q">Search</label><input id="q" placeholder="ID, patient, ambulance, condition"></div>
+        <div><label for="fStatus">Status</label>
+          <select id="fStatus">
+            <option value="ALL">All statuses</option>
+            <option value="AWAITING">Awaiting our response</option>
+            <option>PENDING</option><option>ACCEPTED</option><option>DECLINED</option>
+            <option>CANCELLED</option><option>COMPLETED</option>
+          </select></div>
+        <div><label for="fUrg">Urgency</label>
+          <select id="fUrg"><option value="ALL">All</option><option>Normal</option><option>High</option><option>Critical</option></select></div>
+        <div><label for="fReady">Our readiness</label>
+          <select id="fReady"><option value="ALL">All</option><option value="READY">Meets stated needs</option><option value="PARTIAL">Missing a requirement</option><option value="UNAVAILABLE">Unavailable</option></select></div>
+      </div>
+      <label for="fSpec">Specialist required</label>
+      <select id="fSpec"><option value="ALL">All</option></select>
+      <div id="list" style="margin-top:.8rem"><div class="empty">Loading requests…</div></div>
+    </section>
+
+    <section class="card" id="detailCard" aria-live="polite">
+      <h2>Request details</h2>
+      <div id="detail"><div class="empty">Select a request to see the full details.</div></div>
+    </section>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="common.js"></script>
+<script>
+renderNav("hospital");
+const $ = (id) => document.getElementById(id);
+
+let hospitals = [], me = null, requests = [];
+let selectedId = new URLSearchParams(location.search).get("request") || "";
+let listSig = "", detailSig = "", dmap = null, busy = false;
+
+function setConn(ok) {
+  $("conn").className = "conn " + (ok ? "on" : "off");
+  $("conn").querySelector("span").textContent = ok ? "Connected (refreshes every 5 s)" : "Server not reachable";
+}
+
+// ------------------------------------------------ startup
+async function init() {
+  try {
+    hospitals = await api("/hospitals");
+  } catch (e) {
+    setConn(false);
+    $("list").innerHTML = `<div class="notice err">${esc(e.message)}</div>`;
+    return;
+  }
+  $("hospSel").innerHTML = hospitals.map((h) => `<option value="${esc(h.id)}">${esc(h.name)} (${esc(h.id)})</option>`).join("");
+  const saved = localStorage.getItem("resq.hospital");
+  $("hospSel").value = hospitals.some((h) => h.id === saved) ? saved : hospitals[0]?.id;
+  $("hospSel").addEventListener("change", () => {
+    localStorage.setItem("resq.hospital", $("hospSel").value);
+    listSig = detailSig = ""; selectedId = ""; requests = [];
+    load();
+  });
+  every(5000, load);
+}
+
+async function load() {
+  if (busy) return;
+  busy = true;
+  const id = $("hospSel").value;
+  try {
+    const [h, r] = await Promise.all([api("/hospitals"), api("/requests?hospitalId=" + encodeURIComponent(id))]);
+    hospitals = h; requests = r;
+    me = hospitals.find((x) => x.id === id);
+    setConn(true);
+    renderHospital(); renderStats(); renderSpecFilter(); renderList(); renderDetail();
+  } catch (e) {
+    setConn(false);
+    if (!requests.length) $("list").innerHTML = `<div class="notice err">Could not load requests: ${esc(e.message)}</div>`;
+  } finally {
+    busy = false;
+  }
+}
+
+// ------------------------------------------------ hospital card
+let capSig = "";
+function renderHospital() {
+  const sig = JSON.stringify(me);
+  if (sig === capSig) return;
+  capSig = sig;
+  $("hospInfo").innerHTML = `
+    <div><small>Hospital ID</small>${esc(me.id)}</div>
+    <div><small>Location (demo)</small>${esc(me.area || "")} · ${esc(me.latitude)}, ${esc(me.longitude)}</div>
+    <div><small>Availability</small>${me.available === false ? '<span class="badge red">Unavailable</span>' : '<span class="badge green">Available</span>'}</div>
+    <div><small>Specialists</small>${esc((me.specialists || []).join(", ") || "none listed")}</div>
+    <div><small>Equipment</small>${esc((me.equipment || []).join(", ") || "none listed")}</div>`;
+  $("bedsIn").value = me.availableBeds ?? 0;
+  $("icuIn").value = me.icuBeds ?? 0;
+  $("availIn").value = String(me.available !== false);
+}
+$("saveCap").addEventListener("click", async () => {
+  try {
+    await api("/hospitals/" + encodeURIComponent(me.id), {
+      method: "PATCH",
+      body: { availableBeds: Number($("bedsIn").value), icuBeds: Number($("icuIn").value), available: $("availIn").value === "true" }
+    });
+    toast("Capacity saved.");
+    capSig = detailSig = listSig = "";
+    load();
+  } catch (e) { toast("Could not save: " + e.message, true); }
+});
+
+// ------------------------------------------------ stats + filters
+function renderStats() {
+  $("sIncoming").textContent = requests.length;
+  $("sPending").textContent = requests.filter((r) => r.status === "PENDING" && !r.forHospital.myResponse).length;
+  $("sAccepted").textContent = requests.filter((r) => r.acceptedHospitalId === me.id).length;
+  $("sDeclined").textContent = requests.filter((r) => r.forHospital.myResponse?.decision === "declined").length;
+}
+
+function renderSpecFilter() {
+  const specs = [...new Set(requests.map((r) => r.requiredSpecialist).filter(Boolean))].sort();
+  const current = $("fSpec").value;
+  const html = '<option value="ALL">All</option><option value="NONE">No specialist required</option>' +
+    specs.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  if ($("fSpec").dataset.sig !== html) {
+    $("fSpec").innerHTML = html; $("fSpec").dataset.sig = html;
+    $("fSpec").value = [...$("fSpec").options].some((o) => o.value === current) ? current : "ALL";
+  }
+}
+
+function filtered() {
+  const q = $("q").value.toLowerCase().trim();
+  const st = $("fStatus").value, ur = $("fUrg").value, sp = $("fSpec").value, rd = $("fReady").value;
+  return requests.filter((r) => {
+    const f = r.forHospital;
+    if (st === "AWAITING" ? !(r.status === "PENDING" && !f.myResponse) : st !== "ALL" && r.status !== st) return false;
+    if (ur !== "ALL" && r.urgency !== ur) return false;
+    if (sp === "NONE" ? r.requiredSpecialist : sp !== "ALL" && r.requiredSpecialist !== sp) return false;
+    if (rd !== "ALL" && f.readiness !== rd) return false;
+    return !q || [r.id, r.patientName, r.ambulanceNumber, r.condition].join(" ").toLowerCase().includes(q);
+  });
+}
+
+// ------------------------------------------------ list
+function renderList() {
+  const items = filtered();
+  const sig = JSON.stringify([items.map((r) => [r.id, r.status, r.updatedAt, r.forHospital.readiness, r.forHospital.distanceKm]), selectedId]);
+  if (sig === listSig) return;
+  listSig = sig;
+  $("list").innerHTML = items.length ? items.map((r) => {
+    const f = r.forHospital;
+    return `<article class="item${r.id === selectedId ? " selected" : ""}">
+      <div class="item-top">
+        <div><strong>${esc(r.id)}</strong><div class="muted">${esc(fmtTime(r.createdAt))}</div></div>
+        <div class="row">${r.urgency !== "Normal" ? `<span class="badge ${r.urgency === "Critical" ? "red" : "amber"}">${esc(r.urgency)}</span>` : ""}${badge(r.status)}</div>
+      </div>
+      <p><strong>${esc(r.patientName)}</strong> · ${esc(r.condition)}</p>
+      <p class="muted">Needs: ${esc(r.requiredSpecialist || "no specialist")}${r.requiredEquipment.length ? ", " + esc(r.requiredEquipment.join(", ")) : ""}
+        · ${f.distanceKm === null ? "distance n/a" : esc(f.distanceKm) + " km away"}</p>
+      <div class="row">
+        <span class="badge ${READY_CLASS[f.readiness]}">${esc(READY_TEXT[f.readiness])}</span>
+        ${f.myResponse ? `<span class="badge ${f.myResponse.decision === "accepted" ? "green" : "red"}">We ${esc(f.myResponse.decision)}</span>` : ""}
+        ${r.originalTranscript || r.voiceRecordingUrl ? '<span class="badge blue">Voice</span>' : ""}
+        <button class="btn small" data-open="${esc(r.id)}" type="button">View details</button>
+      </div>
+    </article>`;
+  }).join("") : `<div class="empty">${requests.length ? "No requests match these filters." : "No SOS requests yet. Send one from the Ambulance page."}</div>`;
+}
+$("list").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-open]");
+  if (!b) return;
+  selectedId = b.dataset.open; detailSig = ""; listSig = "";
+  renderList(); renderDetail();
+  if (window.innerWidth < 960) $("detailCard").scrollIntoView({ behavior: "smooth" });
+});
+["q", "fStatus", "fUrg", "fSpec", "fReady"].forEach((id) =>
+  $(id).addEventListener("input", () => { listSig = ""; renderList(); }));
+
+// ------------------------------------------------ detail
+function renderDetail() {
+  const r = requests.find((x) => x.id === selectedId);
+  if (!r) {
+    if (detailSig !== "none") {
+      detailSig = "none";
+      if (dmap) { dmap.remove(); dmap = null; }
+      $("detail").innerHTML = '<div class="empty">Select a request to see the full details.</div>';
+    }
+    return;
+  }
+  const sig = JSON.stringify(r);
+  if (sig === detailSig) return;
+  detailSig = sig;
+
+  const f = r.forHospital;
+  const lat = num(r.latitude), lon = num(r.longitude);
+  const hasPos = coordsOK(lat, lon);
+  const others = r.hospitalResponses.filter((x) => x.hospitalId !== me.id);
+
+  let actions = "";
+  if (r.status === "PENDING" && !f.myResponse) {
+    actions = me.available === false
+      ? '<div class="notice">This hospital is marked unavailable, so it cannot accept. You can still decline, or change availability above.</div>'
+      : "";
+    actions += `<div class="row">
+      <button class="btn ok" data-act="accepted" type="button" ${me.available === false ? "disabled" : ""}>Accept request</button>
+      <button class="btn danger" data-act="declined" type="button">Decline request</button></div>`;
+  } else if (f.myResponse) {
+    actions = `<div class="notice ${f.myResponse.decision === "accepted" ? "good" : ""}">We ${esc(f.myResponse.decision)} this request on ${esc(fmtTime(f.myResponse.respondedAt))}${f.myResponse.message ? ` – “${esc(f.myResponse.message)}”` : ""}.</div>`;
+  }
+  if (r.status === "ACCEPTED" && r.acceptedHospitalId === me.id) {
+    actions += '<button class="btn primary" data-act="complete" type="button">Mark case completed</button>';
+  } else if (r.status === "ACCEPTED") {
+    actions += `<div class="notice">Already accepted by ${esc(r.acceptedHospitalName)}. No other hospital can accept it.</div>`;
+  } else if (r.status !== "PENDING" && !f.myResponse) {
+    actions += `<div class="notice">This request is ${esc(r.status)} and can no longer receive responses.</div>`;
+  }
+
+  const checks = [
+    [f.specialistAvailable, r.requiredSpecialist ? `Specialist: ${r.requiredSpecialist}` : "No specialist required"],
+    [f.equipmentAvailable, r.requiredEquipment.length ? `Equipment: ${r.requiredEquipment.join(", ")}` : "No equipment required"],
+    [f.bedsAvailable, "General bed available"],
+    [f.icuAvailable, r.urgency === "Critical" ? "ICU bed (Critical)" : "ICU not required"]
+  ].map(([ok, label]) => `<li>${ok ? "✓" : "✗"} ${esc(label)}</li>`).join("");
+
+  $("detail").innerHTML = `
+    <div class="item-top"><div><strong>${esc(r.id)}</strong><div class="muted">${esc(fmtTime(r.createdAt))}</div></div>
+      <div class="row"><span class="badge ${r.urgency === "Critical" ? "red" : r.urgency === "High" ? "amber" : ""}">${esc(r.urgency)}</span>${badge(r.status)}</div></div>
+
+    <h3>Patient</h3>
+    <div class="kv">
+      <div><small>Name / ID</small>${esc(r.patientName)}</div>
+      <div><small>Age</small>${r.age === null || r.age === undefined ? "Not given" : esc(r.age)}</div>
+      <div><small>Emergency type</small>${esc(r.emergencyType || "Not given")}</div>
+      <div><small>Ambulance</small>${esc(r.ambulanceNumber)}</div>
+    </div>
+    <div class="kv" style="grid-template-columns:1fr"><div><small>Emergency description</small>${esc(r.condition)}</div></div>
+
+    <h3>Voice report</h3>
+    ${r.voiceRecordingUrl ? `<audio controls preload="none" src="${esc(r.voiceRecordingUrl)}">Your browser cannot play this audio.</audio>` : '<p class="muted">No voice recording attached.</p>'}
+    <div class="two" style="margin-top:.5rem">
+      <div class="kv" style="grid-template-columns:1fr"><div><small>Original transcript (${esc(LANG_NAMES[r.language] || r.language || "language not recorded")})</small>${r.originalTranscript ? esc(r.originalTranscript) : '<span class="muted">No transcript. The audio may still be playable above.</span>'}</div></div>
+      <div class="kv" style="grid-template-columns:1fr"><div><small>Translated transcript${r.translationTarget ? " (" + esc(LANG_NAMES[r.translationTarget] || r.translationTarget) + ")" : ""}${r.translationStatus === "machine" ? " – machine translated" : r.translationStatus === "manual" ? " – typed by staff" : ""}</small>${r.translatedTranscript ? esc(r.translatedTranscript) : '<span class="muted">No translation.</span>'}</div></div>
+    </div>
+
+    <h3>Ambulance location</h3>
+    <p class="muted" style="margin:0">${esc(SOURCE_TEXT[r.locationSource] || "")}</p>
+    <div class="kv">
+      <div><small>Coordinates</small>${hasPos ? esc(lat) + ", " + esc(lon) : "Not available"}</div>
+      <div><small>Distance to us (straight line)</small>${f.distanceKm === null ? "n/a" : esc(f.distanceKm) + " km"}</div>
+    </div>
+    ${hasPos ? `<div id="dmap" class="mapbox"></div>
+      <a href="${esc(directionsURL(me.latitude, me.longitude, lat, lon))}" target="_blank" rel="noopener noreferrer">Open directions from our hospital</a>` : ""}
+
+    <h3>Our readiness for this request</h3>
+    <span class="badge ${READY_CLASS[f.readiness]}">${esc(READY_TEXT[f.readiness])}</span>
+    <ul style="margin:.5rem 0">${checks}</ul>
+    ${f.issues.length ? `<div class="notice">${esc(f.issues.join("; "))}</div>` : ""}
+    <p class="muted">Requirements come from ${esc(r.requirementsSource || "staff")} and can be reviewed on the
+      <a href="hospital-matches.html?request=${encodeURIComponent(r.id)}">matching page</a>.</p>
+
+    ${others.length ? `<h3>Other hospitals</h3><ul>${others.map((x) => `<li>${esc(x.hospitalName)}: ${esc(x.decision)}${x.message ? " – " + esc(x.message) : ""}</li>`).join("")}</ul>` : ""}
+
+    <h3>Response</h3>${actions}`;
+
+  if (dmap) { dmap.remove(); dmap = null; }
+  if (hasPos) {
+    dmap = makeMap("dmap", [lat, lon], 12);
+    if (dmap) {
+      dot(dmap, lat, lon, "#c4283a", "Ambulance", 10);
+      dot(dmap, num(me.latitude), num(me.longitude), "#2257d6", me.name, 10);
+      dmap.fitBounds([[lat, lon], [num(me.latitude), num(me.longitude)]], { padding: [30, 30] });
+    }
+  }
+}
+
+$("detail").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-act]");
+  if (!b) return;
+  const r = requests.find((x) => x.id === selectedId);
+  const act = b.dataset.act;
+  const path = `/requests/${encodeURIComponent(r.id)}/`;
+  try {
+    if (act === "complete") {
+      const ok = await confirmDialog({ title: "Mark case completed?", body: `<p>${esc(r.id)} will be closed.</p>`, confirmText: "Mark completed" });
+      if (!ok.confirmed) return;
+      await api(path + "complete", { method: "PATCH", body: { hospitalId: me.id } });
+      toast("Case marked completed.");
+    } else {
+      const accept = act === "accepted";
+      const ok = await confirmDialog({
+        title: accept ? "Accept this request?" : "Decline this request?",
+        body: accept
+          ? `<p>${esc(me.name)} will be shown to the ambulance, and no other hospital will be able to accept ${esc(r.id)}.</p>`
+          : `<p>Other hospitals can still respond to ${esc(r.id)}.</p>`,
+        confirmText: accept ? "Accept" : "Decline",
+        danger: !accept,
+        inputLabel: accept ? "Message to ambulance (optional)" : "Reason for declining (optional)"
+      });
+      if (!ok.confirmed) return;
+      await api(path + "respond", { method: "PATCH", body: { hospitalId: me.id, decision: act, message: ok.value } });
+      toast(accept ? "Request accepted." : "Request declined.");
+    }
+  } catch (err) {
+    toast(err.message, true); // e.g. another hospital accepted first
+  }
+  detailSig = listSig = "";
+  load();
+});
+
+init();
+</script>
+</body>
+</html>

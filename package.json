@@ -1,0 +1,24 @@
+{
+  "name": "resqroute",
+  "version": "2.0.0",
+  "description": "ResQRoute - real-time SOS-based hospital coordination prototype (software-only demo)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^5.3.0",
+    "multer": "^2.4.0"
+  }
+}

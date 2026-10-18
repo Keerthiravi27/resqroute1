@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ResQRoute | Ambulance</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🚑 ResQRoute<small>Ambulance dashboard</small></div>
+  <nav id="nav" aria-label="Main"></nav>
+</header>
+
+<main class="wrap">
+  <div class="notice">
+    Demo prototype. This does not contact real emergency services or real hospitals.
+    All hospitals and patients are fictional. Hospital matching is decision support, not a diagnosis.
+  </div>
+
+  <section class="card">
+    <div class="row">
+      <div class="grow">
+        <label for="amb" style="margin-top:0">Ambulance number</label>
+        <input id="amb" maxlength="40" autocomplete="off">
+      </div>
+      <div class="conn off" id="conn" role="status"><i></i><span>Checking server…</span></div>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <div>
+      <!-- LOCATION -->
+      <section class="card">
+        <h2>1. Ambulance location</h2>
+        <div class="row">
+          <button class="btn primary" id="gpsBtn" type="button">Use my GPS</button>
+          <button class="btn" id="demoLocBtn" type="button">Use demo coordinates</button>
+        </div>
+        <div class="two">
+          <div><label for="manLat">Latitude</label><input id="manLat" inputmode="decimal" placeholder="e.g. 13.0700"></div>
+          <div><label for="manLon">Longitude</label><input id="manLon" inputmode="decimal" placeholder="e.g. 80.2600"></div>
+        </div>
+        <button class="btn small" id="manBtn" type="button" style="margin-top:.5rem">Use these coordinates (manual)</button>
+        <p id="locLabel" class="notice err" style="margin-top:.8rem" role="status">No location set yet. Use GPS, demo coordinates, or enter coordinates.</p>
+        <div id="map" class="mapbox" aria-label="Map of ambulance and hospitals"></div>
+        <p class="muted">Blue dots are demo hospitals, the red dot is this ambulance. Map tiles need internet.</p>
+      </section>
+
+      <!-- PATIENT -->
+      <section class="card">
+        <h2>2. Patient and emergency</h2>
+        <div class="two">
+          <div><label for="pName">Patient name or ID</label><input id="pName" maxlength="80" placeholder="Demo patient / ID"></div>
+          <div><label for="pAge">Age (optional)</label><input id="pAge" inputmode="numeric" maxlength="3"></div>
+        </div>
+        <div class="two">
+          <div><label for="eType">Emergency type</label><select id="eType"></select></div>
+          <div><label for="urgency">Urgency</label>
+            <select id="urgency"><option>Normal</option><option>High</option><option>Critical</option></select></div>
+        </div>
+        <div class="two">
+          <div><label for="reqSpec">Required specialist</label>
+            <input id="reqSpec" list="specList" maxlength="60" placeholder="None"><datalist id="specList"></datalist></div>
+          <div><label for="reqEq">Required equipment (comma separated)</label>
+            <input id="reqEq" maxlength="200" placeholder="None"></div>
+        </div>
+        <p class="muted" id="ruleNote">Choosing an emergency type fills these two fields using a configurable demo rule. It is not a medical diagnosis. Review and edit them.</p>
+        <label for="desc">Emergency description</label>
+        <textarea id="desc" maxlength="1000" placeholder="What is happening? (or use the voice report)"></textarea>
+      </section>
+    </div>
+
+    <div>
+      <!-- VOICE -->
+      <section class="card">
+        <h2>3. Voice report (optional)</h2>
+        <div class="row">
+          <div class="grow">
+            <label for="lang" style="margin-top:0">Spoken language</label>
+            <select id="lang">
+              <option value="ta-IN">Tamil (ta-IN)</option>
+              <option value="en-IN">English – India (en-IN)</option>
+              <option value="en-US">English – US (en-US)</option>
+            </select>
+          </div>
+          <div class="grow">
+            <label for="target" style="margin-top:0">Translate to</label>
+            <select id="target"><option value="en">English</option><option value="ta">Tamil</option></select>
+          </div>
+        </div>
+        <div class="row" style="margin-top:.7rem">
+          <button class="btn primary" id="recBtn" type="button">● Start recording</button>
+          <button class="btn" id="discardBtn" type="button" hidden>Discard recording</button>
+          <span id="recTimer" class="muted" aria-live="off"></span>
+        </div>
+        <p id="voiceMsg" class="muted" role="status"></p>
+        <audio id="player" controls hidden></audio>
+        <div class="two">
+          <div>
+            <label for="orig">Original transcript (editable)</label>
+            <textarea id="orig" maxlength="3000" placeholder="Speech recognition output appears here. You can also type it."></textarea>
+          </div>
+          <div>
+            <label for="trans">Translated transcript</label>
+            <textarea id="trans" maxlength="3000" placeholder="Click Translate, or type a translation."></textarea>
+          </div>
+        </div>
+        <div class="row" style="margin-top:.5rem">
+          <button class="btn" id="transBtn" type="button">Translate original</button>
+          <span id="transMsg" class="muted" role="status"></span>
+        </div>
+        <p class="muted" id="transNote"></p>
+      </section>
+
+      <!-- SOS -->
+      <section class="card">
+        <h2>4. Send SOS</h2>
+        <div class="sos-wrap">
+          <button class="sos-btn" id="sosBtn" type="button" aria-label="Send emergency SOS request">SOS</button>
+          <p class="muted">You will be asked to confirm before anything is sent.</p>
+        </div>
+      </section>
+
+      <!-- ACTIVE -->
+      <section class="card" aria-live="polite">
+        <h2>Current request</h2>
+        <div id="active"><div class="empty">No request sent yet.</div></div>
+      </section>
+
+      <!-- HISTORY -->
+      <section class="card">
+        <h2>Request history (this ambulance)</h2>
+        <div id="history"><div class="empty">Loading…</div></div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="common.js"></script>
+<script>
+renderNav("ambulance");
+const $ = (id) => document.getElementById(id);
+const DEMO = { lat: 13.07, lon: 80.26 };
+
+let config = { emergencyTypes: [], translation: { enabled: false } };
+let hospitals = [];
+let loc = null; // { lat, lon, source, accuracy }
+let map = null, ambMarker = null, routeLine = null;
+let activeId = localStorage.getItem("resq.activeId") || "";
+let lastStatus = "";
+let sending = false;
+
+// voice state
+let audioBlob = null, recorder = null, stream = null, recog = null;
+let recording = false, recTimeout = null, recTick = null, recStart = 0;
+let transMode = "none"; // none | machine | manual
+
+// ------------------------------------------------ connection / startup
+function setConn(ok) {
+  const c = $("conn");
+  c.className = "conn " + (ok ? "on" : "off");
+  c.querySelector("span").textContent = ok ? "Connected to server" : "Server not reachable";
+}
+
+async function init() {
+  $("amb").value = localStorage.getItem("resq.amb") || "AMB-DEMO-01";
+  $("amb").addEventListener("change", () => {
+    localStorage.setItem("resq.amb", $("amb").value.trim());
+    loadHistory();
+  });
+
+  map = makeMap("map", [13.0827, 80.2707], 11);
+  try {
+    config = await api("/config");
+    hospitals = await api("/hospitals");
+    setConn(true);
+  } catch (e) {
+    setConn(false);
+    toast(e.message, true);
+  }
+
+  $("eType").innerHTML = config.emergencyTypes.map((r) => `<option>${esc(r.type)}</option>`).join("") || "<option>Other</option>";
+  const specs = [...new Set(hospitals.flatMap((h) => h.specialists || []))];
+  $("specList").innerHTML = specs.map((s) => `<option value="${esc(s)}">`).join("");
+  applyRule();
+  drawHospitals();
+
+  $("transNote").textContent = config.translation.enabled
+    ? `Automatic translation is on (${config.translation.provider}). The transcript TEXT is sent to that service; audio is not. Always check the result.`
+    : "Automatic translation is not configured on the server. Type the translation yourself or leave it empty.";
+
+  if (!window.isSecureContext) {
+    $("voiceMsg").textContent = "Microphone and GPS only work on https:// or http://localhost. Open http://localhost:5000/ambulance.html.";
+  } else if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    $("voiceMsg").textContent = "Audio recording is not supported in this browser. You can still type the report.";
+  }
+
+  every(5000, refresh);
+}
+
+async function refresh() {
+  try { await api("/health"); setConn(true); } catch { setConn(false); return; }
+  if (activeId) await loadActive();
+  await loadHistory();
+}
+
+// ------------------------------------------------ location
+function setLocation(lat, lon, source, accuracy) {
+  loc = { lat, lon, source, accuracy };
+  const label = $("locLabel");
+  label.className = "notice " + (source === "gps" ? "good" : "");
+  label.textContent =
+    `${SOURCE_TEXT[source]}: ${lat.toFixed(5)}, ${lon.toFixed(5)}` +
+    (accuracy ? ` (accuracy about ${Math.round(accuracy)} m)` : "");
+  if (map) {
+    if (ambMarker) ambMarker.remove();
+    ambMarker = dot(map, lat, lon, "#c4283a", "Ambulance (" + source + ")", 11);
+    map.setView([lat, lon], 13);
+  }
+}
+
+function drawHospitals() {
+  if (!map) return;
+  hospitals.forEach((h) => dot(map, Number(h.latitude), Number(h.longitude), "#2257d6", h.name, 8));
+}
+
+$("gpsBtn").addEventListener("click", () => {
+  if (!navigator.geolocation) {
+    toast("This browser has no GPS support. Use demo or manual coordinates.", true);
+    return;
+  }
+  $("locLabel").className = "notice info";
+  $("locLabel").textContent = "Requesting GPS… allow location access if the browser asks.";
+  navigator.geolocation.getCurrentPosition(
+    (p) => setLocation(p.coords.latitude, p.coords.longitude, "gps", p.coords.accuracy),
+    (err) => {
+      const why = err.code === 1 ? "Location permission was denied."
+        : err.code === 2 ? "Position is unavailable." : "GPS timed out.";
+      $("locLabel").className = "notice err";
+      $("locLabel").textContent = why + " No location is set. Use demo or manual coordinates instead.";
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+});
+$("demoLocBtn").addEventListener("click", () => {
+  $("manLat").value = DEMO.lat; $("manLon").value = DEMO.lon;
+  setLocation(DEMO.lat, DEMO.lon, "demo");
+});
+$("manBtn").addEventListener("click", () => {
+  const lat = num($("manLat").value), lon = num($("manLon").value);
+  if (!coordsOK(lat, lon)) { toast("Enter a latitude from -90 to 90 and a longitude from -180 to 180.", true); return; }
+  setLocation(lat, lon, "manual");
+});
+
+// ------------------------------------------------ emergency type rule
+function applyRule() {
+  const rule = config.emergencyTypes.find((r) => r.type === $("eType").value);
+  $("reqSpec").value = rule ? rule.specialist : "";
+  $("reqEq").value = rule ? rule.equipment.join(", ") : "";
+}
+$("eType").addEventListener("change", applyRule);
+
+// ------------------------------------------------ voice recording
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let finalText = "";
+
+function startRecognition() {
+  if (!SR) {
+    $("voiceMsg").textContent = "Recording started. Speech recognition is not supported in this browser (try Chrome or Edge), so type the transcript yourself.";
+    return;
+  }
+  finalText = $("orig").value.trim();
+  recog = new SR();
+  recog.lang = $("lang").value;
+  recog.continuous = true;
+  recog.interimResults = true;
+  recog.onresult = (event) => {
+    let interim = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript.trim();
+      if (event.results[i].isFinal) finalText = (finalText + " " + t).trim();
+      else interim += " " + t;
+    }
+    $("orig").value = (finalText + interim).trim();
+  };
+  recog.onerror = (event) => {
+    const msgs = {
+      "not-allowed": "Speech recognition was blocked. Type the transcript instead.",
+      "service-not-allowed": "Speech recognition is not allowed in this browser. Type the transcript instead.",
+      "network": "Speech recognition needs an internet connection and failed. Type the transcript instead.",
+      "language-not-supported": "This browser does not support recognition for the chosen language. Type the transcript instead."
+    };
+    if (msgs[event.error]) {
+      $("voiceMsg").textContent = msgs[event.error];
+      recog = null; // do not auto-restart
+    }
+  };
+  recog.onend = () => { if (recording && recog) { try { recog.start(); } catch { /* ignore */ } } };
+  try { recog.start(); } catch { recog = null; }
+}
+
+async function startRecording() {
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    $("voiceMsg").textContent = "Audio recording is not supported here. Type the report instead.";
+    return;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    $("voiceMsg").textContent =
+      e.name === "NotAllowedError" ? "Microphone permission was denied. Allow it in the browser address bar, or type the report."
+      : e.name === "NotFoundError" ? "No microphone was found. Type the report instead."
+      : "The microphone could not be started: " + e.message;
+    return;
+  }
+  const type = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"]
+    .find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  const chunks = [];
+  recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    stream.getTracks().forEach((t) => t.stop());
+    const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+    if (!blob.size) {
+      audioBlob = null;
+      $("voiceMsg").textContent = "The recording is empty. Nothing was captured. Try again.";
+      return;
+    }
+    audioBlob = blob;
+    $("player").src = URL.createObjectURL(blob);
+    $("player").hidden = false;
+    $("discardBtn").hidden = false;
+    $("voiceMsg").textContent = $("orig").value.trim()
+      ? "Recording saved. Check the transcript below before sending; speech recognition can make mistakes."
+      : "Recording saved, but no text was recognised. Listen to it and type a transcript if you can.";
+  };
+  recorder.start(250);
+  recording = true;
+  recStart = Date.now();
+  $("recBtn").innerHTML = '<span class="rec-dot"></span>Stop recording';
+  $("voiceMsg").textContent = "Recording… speak clearly. It stops automatically after 60 seconds.";
+  recTick = setInterval(() => { $("recTimer").textContent = Math.round((Date.now() - recStart) / 1000) + " s"; }, 500);
+  recTimeout = setTimeout(stopRecording, 60000);
+  startRecognition();
+}
+
+function stopRecording() {
+  if (!recording) return;
+  recording = false;
+  clearTimeout(recTimeout); clearInterval(recTick);
+  $("recBtn").textContent = "● Start recording";
+  try { recog && recog.stop(); } catch { /* ignore */ }
+  recog = null;
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+}
+
+$("recBtn").addEventListener("click", () => (recording ? stopRecording() : startRecording()));
+$("discardBtn").addEventListener("click", () => {
+  audioBlob = null;
+  $("player").removeAttribute("src"); $("player").hidden = true;
+  $("discardBtn").hidden = true;
+  $("voiceMsg").textContent = "Recording discarded.";
+});
+
+// ------------------------------------------------ translation
+$("trans").addEventListener("input", () => { transMode = $("trans").value.trim() ? "manual" : "none"; });
+$("transBtn").addEventListener("click", async () => {
+  const input = $("orig").value.trim();
+  if (!input) { $("transMsg").textContent = "Enter or record something first."; return; }
+  const from = $("lang").value.slice(0, 2), to = $("target").value;
+  if (from === to) { $("transMsg").textContent = "The spoken language and target language are the same."; return; }
+  $("transBtn").disabled = true;
+  $("transMsg").textContent = "Translating…";
+  try {
+    const r = await api("/translate", { method: "POST", body: { text: input, from, to } });
+    $("trans").value = r.translatedText;
+    transMode = "machine";
+    $("transMsg").textContent = `Translated by ${r.provider}. Check it before sending.`;
+  } catch (e) {
+    $("transMsg").textContent = "Translation failed: " + e.message + " (nothing was translated).";
+  } finally {
+    $("transBtn").disabled = false;
+  }
+});
+
+// ------------------------------------------------ submit SOS
+$("sosBtn").addEventListener("click", async () => {
+  if (sending) return;
+  if (recording) stopRecording();
+  const ambulance = $("amb").value.trim();
+  if (!ambulance) { toast("Enter the ambulance number.", true); return; }
+  if (!loc) { toast("Set the ambulance location first (GPS, demo or manual).", true); return; }
+  if (!$("desc").value.trim() && !$("orig").value.trim() && !audioBlob) {
+    toast("Describe the emergency, record a voice report, or enter a transcript.", true);
+    return;
+  }
+  const age = $("pAge").value.trim();
+  if (age && (!/^\d{1,3}$/.test(age) || Number(age) > 120)) { toast("Age must be a number from 0 to 120.", true); return; }
+  if (activeId && lastStatus === "PENDING") {
+    toast("You already have a pending request. Cancel it before sending another.", true);
+    return;
+  }
+
+  const ok = await confirmDialog({
+    title: "Send emergency SOS?",
+    body: `<p>Ambulance <strong>${esc(ambulance)}</strong>, urgency <strong>${esc($("urgency").value)}</strong>.</p>
+           <p>Location: ${esc(SOURCE_TEXT[loc.source])}.</p>
+           <p>${audioBlob ? "A voice recording will be uploaded." : "No voice recording attached."}</p>
+           <p class="muted">Demo only: no real emergency service is contacted.</p>`,
+    confirmText: "Send SOS",
+    danger: true
+  });
+  if (!ok.confirmed) return;
+
+  sending = true;
+  $("sosBtn").disabled = true;
+  const fd = new FormData();
+  fd.append("ambulanceNumber", ambulance);
+  fd.append("patientName", $("pName").value.trim());
+  fd.append("age", age);
+  fd.append("emergencyType", $("eType").value);
+  fd.append("urgency", $("urgency").value);
+  fd.append("requiredSpecialist", $("reqSpec").value.trim());
+  fd.append("requiredEquipment", JSON.stringify($("reqEq").value.split(",").map((s) => s.trim()).filter(Boolean)));
+  fd.append("condition", $("desc").value.trim());
+  fd.append("latitude", String(loc.lat));
+  fd.append("longitude", String(loc.lon));
+  fd.append("locationSource", loc.source);
+  fd.append("language", $("lang").value);
+  fd.append("originalTranscript", $("orig").value.trim());
+  fd.append("translatedTranscript", $("trans").value.trim());
+  fd.append("translationTarget", $("target").value);
+  fd.append("translationStatus", transMode === "machine" ? "machine" : "manual");
+  if (audioBlob) {
+    const ext = audioBlob.type.includes("ogg") ? "ogg" : audioBlob.type.includes("mp4") ? "mp4" : "webm";
+    fd.append("audio", audioBlob, `voice.${ext}`);
+  }
+
+  try {
+    const r = await api("/sos", { method: "POST", body: fd });
+    localStorage.setItem("resq.amb", ambulance);
+    activeId = r.id; lastStatus = "PENDING";
+    localStorage.setItem("resq.activeId", activeId);
+    toast(`SOS sent. Request ID: ${r.id}`);
+    await loadActive();
+    await loadHistory();
+  } catch (e) {
+    toast("SOS was NOT sent: " + e.message, true);
+  } finally {
+    sending = false;
+    $("sosBtn").disabled = false;
+  }
+});
+
+// ------------------------------------------------ live status
+async function loadActive() {
+  try {
+    const r = await api("/requests/" + encodeURIComponent(activeId));
+    if (lastStatus && r.status !== lastStatus) {
+      toast(`Request ${r.id} is now ${r.status}` + (r.acceptedHospitalName ? ` – ${r.acceptedHospitalName}` : ""));
+    }
+    lastStatus = r.status;
+    renderActive(r);
+  } catch (e) {
+    if (/not found/i.test(e.message)) {
+      activeId = ""; localStorage.removeItem("resq.activeId");
+      $("active").innerHTML = '<div class="empty">The previous request no longer exists.</div>';
+    } else {
+      $("active").insertAdjacentHTML("afterbegin", `<div class="notice err">Could not refresh: ${esc(e.message)}</div>`);
+    }
+  }
+}
+
+function renderActive(r) {
+  const responses = r.hospitalResponses.map((x) =>
+    `<li>${esc(x.hospitalName)}: <strong>${x.decision === "accepted" ? "Accepted" : "Declined"}</strong>
+     ${x.message ? ` – “${esc(x.message)}”` : ""} <span class="muted">${esc(fmtTime(x.respondedAt))}</span></li>`
+  ).join("");
+
+  let body = "";
+  if (r.status === "PENDING") {
+    body = `<div class="notice info">Waiting for a hospital to accept. ${r.hospitalResponses.length} response(s) so far. Declines from one hospital do not close the request.</div>`;
+  } else if (r.status === "DECLINED") {
+    body = `<div class="notice err">Every hospital declined this request. Send a new request or contact a hospital directly.</div>`;
+  } else if (r.status === "CANCELLED") {
+    body = `<div class="notice">You withdrew this request.</div>`;
+  } else if (r.status === "ACCEPTED" || r.status === "COMPLETED") {
+    const h = r.acceptedHospital;
+    body = `<div class="notice good"><strong>${esc(r.acceptedHospitalName)}</strong> ${r.status === "COMPLETED" ? "completed this case." : "accepted. Proceed to this hospital."}</div>`;
+    if (h) {
+      body += `<div class="kv">
+        <div><small>Hospital</small>${esc(h.name)}<br><span class="muted">${esc(h.area)}</span></div>
+        <div><small>Straight-line distance</small>${h.distanceKm === null ? "n/a" : esc(h.distanceKm) + " km"}</div>
+        <div><small>Readiness for this request</small>${esc(READY_TEXT[h.readiness] || h.readiness)}</div>
+        <div><small>Beds / ICU beds listed</small>${esc(h.availableBeds)} / ${esc(h.icuBeds)}</div>
+        <div><small>Specialists</small>${esc((h.specialists || []).join(", ") || "none listed")}</div>
+        <div><small>Equipment</small>${esc((h.equipment || []).join(", ") || "none listed")}</div>
+      </div>`;
+      if (h.issues && h.issues.length) body += `<div class="notice">Gaps to verify by phone: ${esc(h.issues.join("; "))}</div>`;
+      body += `<a class="btn primary" target="_blank" rel="noopener noreferrer"
+        href="${esc(directionsURL(r.latitude, r.longitude, h.latitude, h.longitude))}">Open driving directions</a>
+        <p class="muted">Directions open on openstreetmap.org and need internet. The dashed line on the map is a straight line, not a road route.</p>`;
+      drawRoute(r, h);
+    }
+  }
+
+  $("active").innerHTML = `
+    <div class="item-top"><div><strong>${esc(r.id)}</strong><div class="muted">${esc(fmtTime(r.createdAt))}</div></div>${badge(r.status)}</div>
+    <p>${esc(r.patientName)} · ${esc(r.urgency)} · ${esc(r.condition)}</p>
+    <p class="muted">Location: ${esc(SOURCE_TEXT[r.locationSource] || "")}</p>
+    ${body}
+    ${responses ? `<h3>Hospital responses</h3><ul>${responses}</ul>` : ""}
+    ${r.status === "PENDING" ? '<button class="btn danger" id="cancelBtn" type="button">Cancel request</button>' : ""}`;
+
+  const cancel = $("cancelBtn");
+  if (cancel) cancel.addEventListener("click", cancelRequest);
+}
+
+function drawRoute(r, h) {
+  if (!map) return;
+  if (routeLine) routeLine.remove();
+  routeLine = L.polyline([[r.latitude, r.longitude], [h.latitude, h.longitude]], { color: "#0f7a4f", dashArray: "6 8" }).addTo(map);
+  map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+}
+
+async function cancelRequest() {
+  const ok = await confirmDialog({
+    title: "Cancel this SOS?",
+    body: "<p>The request is withdrawn and hospitals can no longer accept it.</p>",
+    confirmText: "Cancel request", danger: true, inputLabel: "Reason (optional)"
+  });
+  if (!ok.confirmed) return;
+  try {
+    await api(`/requests/${encodeURIComponent(activeId)}/cancel`, { method: "PATCH", body: { reason: ok.value } });
+    toast("Request cancelled.");
+    await loadActive();
+    await loadHistory();
+  } catch (e) {
+    toast("Could not cancel: " + e.message, true); // e.g. a hospital accepted just now
+    await loadActive();
+  }
+}
+
+// ------------------------------------------------ history
+async function loadHistory() {
+  const amb = $("amb").value.trim();
+  try {
+    const list = await api("/requests?ambulanceNumber=" + encodeURIComponent(amb));
+    $("history").innerHTML = list.length
+      ? list.slice(0, 8).map((r) => `
+          <div class="item${r.id === activeId ? " selected" : ""}">
+            <div class="item-top"><strong>${esc(r.id)}</strong>${badge(r.status)}</div>
+            <p>${esc(r.condition)}</p>
+            <div class="row"><span class="muted">${esc(fmtTime(r.createdAt))}${r.acceptedHospitalName ? " · " + esc(r.acceptedHospitalName) : ""}</span>
+              <button class="btn small" data-track="${esc(r.id)}" type="button">Track</button></div>
+          </div>`).join("")
+      : '<div class="empty">No requests for this ambulance number yet.</div>';
+  } catch (e) {
+    $("history").innerHTML = `<div class="notice err">Could not load history: ${esc(e.message)}</div>`;
+  }
+}
+$("history").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-track]");
+  if (!b) return;
+  activeId = b.dataset.track; lastStatus = "";
+  localStorage.setItem("resq.activeId", activeId);
+  loadActive();
+});
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ResQRoute | Hospital matching</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">✚ ResQRoute<small>Hospital matching</small></div>
+  <nav id="nav" aria-label="Main"></nav>
+</header>
+
+<main class="wrap">
+  <div class="notice">
+    Decision support only. Hospitals are ranked by capability first and distance second, using the
+    transparent points below. The requirement mapping is a configurable demo rule, not a clinically
+    validated prediction. This page does not book a hospital or dispatch an ambulance.
+  </div>
+
+  <section class="card">
+    <label for="reqSel" style="margin-top:0">SOS request</label>
+    <select id="reqSel"></select>
+    <div id="summary"></div>
+  </section>
+
+  <section class="card" id="editCard" hidden>
+    <h2>Review the requirements used for ranking</h2>
+    <div class="two">
+      <div><label for="eSpec">Required specialist</label><input id="eSpec" list="specList" maxlength="60" placeholder="None"><datalist id="specList"></datalist></div>
+      <div><label for="eEq">Required equipment (comma separated)</label><input id="eEq" maxlength="200" placeholder="None"></div>
+      <div><label for="eUrg">Urgency (Critical also requires an ICU bed)</label>
+        <select id="eUrg"><option>Normal</option><option>High</option><option>Critical</option></select></div>
+    </div>
+    <button class="btn primary" id="reRank" type="button" style="margin-top:.7rem">Save and re-rank</button>
+    <span id="editMsg" class="muted" role="status"></span>
+  </section>
+
+  <div id="insight"></div>
+  <div class="grid2">
+    <section class="card"><h2>Map</h2><div id="map" class="mapbox"></div>
+      <p class="muted">Numbers show the ranking. Red dot = ambulance. Distances are straight-line, not road distance.</p></section>
+    <section class="card"><h2>How the points work</h2>
+      <p class="muted">Maximum 100: hospital available 10, general bed 10, specialist 30, equipment 30, ICU bed 10
+        (only counted when the request is Critical), distance 10 (0 km = 10 points, 20 km or more = 0).
+        The label (Meets stated needs / Missing a requirement / Unavailable) is applied first, and points only order hospitals
+        inside the same label. A close hospital can never outrank a hospital that has everything the request needs.</p></section>
+  </div>
+
+  <div id="results"><div class="empty">Loading…</div></div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="common.js"></script>
+<script>
+renderNav("matches");
+const $ = (id) => document.getElementById(id);
+let currentId = new URLSearchParams(location.search).get("request") || "";
+let map = null, layer = null;
+
+async function init() {
+  map = makeMap("map", [13.0827, 80.2707], 11);
+  try {
+    const [reqs, hospitals] = await Promise.all([api("/requests"), api("/hospitals")]);
+    $("specList").innerHTML = [...new Set(hospitals.flatMap((h) => h.specialists || []))].map((s) => `<option value="${esc(s)}">`).join("");
+    if (!reqs.length) {
+      $("reqSel").innerHTML = "<option>No requests yet</option>";
+      $("results").innerHTML = '<div class="empty">No SOS requests exist. Send one from the Ambulance page first.</div>';
+      return;
+    }
+    $("reqSel").innerHTML = reqs.map((r) => `<option value="${esc(r.id)}">${esc(r.id)} · ${esc(r.status)} · ${esc(r.condition.slice(0, 50))}</option>`).join("");
+    if (!reqs.some((r) => r.id === currentId)) currentId = reqs[0].id;
+    $("reqSel").value = currentId;
+    loadMatches();
+  } catch (e) {
+    $("results").innerHTML = `<div class="notice err">Could not load requests: ${esc(e.message)}</div>`;
+  }
+}
+
+$("reqSel").addEventListener("change", () => { currentId = $("reqSel").value; loadMatches(); });
+
+async function loadMatches() {
+  $("results").innerHTML = '<div class="empty">Comparing hospitals…</div>';
+  try {
+    const d = await api(`/requests/${encodeURIComponent(currentId)}/matches`);
+    render(d);
+  } catch (e) {
+    $("results").innerHTML = `<div class="notice err">Matching failed: ${esc(e.message)}</div>`;
+  }
+}
+
+function render(d) {
+  const r = d.request;
+  $("summary").innerHTML = `
+    <div class="kv">
+      <div><small>Request</small>${esc(r.id)} ${badge(r.status)}</div>
+      <div><small>Patient / condition</small>${esc(r.patientName)} · ${esc(r.condition)}</div>
+      <div><small>Required specialist</small>${esc(r.requiredSpecialist || "None")}</div>
+      <div><small>Required equipment</small>${esc(r.requiredEquipment.join(", ") || "None")}</div>
+      <div><small>Urgency</small>${esc(r.urgency)}</div>
+      <div><small>Requirements source</small>${esc(r.requirementsSource || "staff")}</div>
+      <div><small>Ambulance location</small>${esc(SOURCE_TEXT[r.locationSource] || "")}</div>
+      <div><small>Accepted by</small>${esc(r.acceptedHospitalName || "Nobody yet")}</div>
+    </div>
+    ${r.originalTranscript ? `<div class="kv" style="grid-template-columns:1fr"><div><small>Voice transcript</small>${esc(r.originalTranscript)}</div></div>` : ""}
+    ${r.voiceRecordingUrl ? `<audio controls preload="none" src="${esc(r.voiceRecordingUrl)}"></audio>` : ""}`;
+
+  const editable = r.status === "PENDING";
+  $("editCard").hidden = !editable;
+  $("eSpec").value = r.requiredSpecialist;
+  $("eEq").value = r.requiredEquipment.join(", ");
+  $("eUrg").value = r.urgency;
+  $("editMsg").textContent = "";
+
+  const list = d.matches;
+  const nearest = [...list].filter((m) => m.distanceKm !== null).sort((a, b) => a.distanceKm - b.distanceKm)[0];
+  const top = list[0];
+  $("insight").innerHTML = nearest && top && nearest.hospitalId !== top.hospitalId
+    ? `<div class="notice info"><strong>${esc(nearest.hospitalName)}</strong> is the nearest hospital (${esc(nearest.distanceKm)} km) but is ranked #${nearest.rank}
+       because: ${esc(nearest.issues.join("; ") || "another hospital scores higher")}. Top match: <strong>${esc(top.hospitalName)}</strong>.</div>`
+    : "";
+
+  // map
+  if (map) {
+    if (layer) layer.remove();
+    layer = L.layerGroup().addTo(map);
+    const pts = [];
+    const a = [num(r.latitude), num(r.longitude)];
+    if (coordsOK(...a)) { const m = dot(map, a[0], a[1], "#c4283a", "Ambulance", 11); m && layer.addLayer(m); pts.push(a); }
+    list.forEach((m) => {
+      const p = dot(map, num(m.latitude), num(m.longitude), m.readiness === "READY" ? "#0f7a4f" : m.readiness === "PARTIAL" ? "#b8741a" : "#c4283a", `#${m.rank} ${m.hospitalName}`, 11);
+      if (p) { p.bindTooltip(String(m.rank), { permanent: true, direction: "center", className: "" }); layer.addLayer(p); pts.push([num(m.latitude), num(m.longitude)]); }
+    });
+    if (pts.length) map.fitBounds(pts, { padding: [30, 30] });
+  }
+
+  $("results").innerHTML = '<div class="grid2">' + list.map((m) => `
+    <article class="card">
+      <div class="item-top">
+        <div><h2 style="margin:0">#${m.rank} ${esc(m.hospitalName)}</h2><div class="muted">${esc(m.hospitalId)} · ${esc(m.area)}</div></div>
+        <span class="badge ${READY_CLASS[m.readiness]}">${esc(READY_TEXT[m.readiness])}</span>
+      </div>
+      <p style="margin:.6rem 0 .2rem"><strong>${m.score}/100</strong> demo points · ${m.distanceKm === null ? "distance n/a" : esc(m.distanceKm) + " km straight line"}</p>
+      <div class="bar" aria-hidden="true"><i style="width:${m.score}%"></i></div>
+      <div class="kv">
+        <div><small>General beds</small>${esc(m.availableBeds)}</div>
+        <div><small>ICU beds</small>${esc(m.icuBeds)}</div>
+        <div><small>Specialists</small>${esc(m.specialists.join(", ") || "none")}</div>
+        <div><small>Equipment</small>${esc(m.equipment.join(", ") || "none")}</div>
+      </div>
+      ${m.issues.length ? `<div class="notice">${esc(m.issues.join("; "))}</div>` : '<div class="notice good">No gaps found against the stated requirements. Staff must still confirm real availability.</div>'}
+      <table class="plain"><caption class="muted" style="text-align:left">Why this ranking</caption>
+        <thead><tr><th>Factor</th><th>Points</th><th>Note</th></tr></thead>
+        <tbody>${m.breakdown.map((b) => `<tr><td>${esc(b.label)}</td><td>${b.points}/${b.max}</td><td>${esc(b.note)}</td></tr>`).join("")}</tbody></table>
+    </article>`).join("") + "</div>";
+}
+
+$("reRank").addEventListener("click", async () => {
+  try {
+    await api(`/requests/${encodeURIComponent(currentId)}/requirements`, {
+      method: "PATCH",
+      body: { requiredSpecialist: $("eSpec").value.trim(), requiredEquipment: $("eEq").value, urgency: $("eUrg").value }
+    });
+    await loadMatches();
+    $("editMsg").textContent = "Saved. Ranking updated.";
+    toast("Requirements saved.");
+  } catch (e) { toast("Could not save: " + e.message, true); }
+});
+
+init();
+</script>
+</body>
+</html>
